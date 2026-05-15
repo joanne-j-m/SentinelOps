@@ -128,7 +128,7 @@ def analyst_node(state: SentinelState) -> SentinelState:
                 f"Enrichment complete (loop {loop_count}). "
                 f"Confidence: {confidence:.0%}. "
                 f"Assessment: {assessment[:100]}... "
-                + ("→ Requesting more Scout data." if should_loop
+                + ("→ Confidence below threshold, requesting more Scout data." if should_loop
                    else "→ Sufficient confidence, proceeding to report.")
             ),
             "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
