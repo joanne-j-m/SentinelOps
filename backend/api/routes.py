@@ -56,7 +56,22 @@ class WebhookAlertRequest(BaseModel):
 # ── Routes ─────────────────────────────────────────────────────────────────
 @router.get("/health")
 async def health():
-    return {"status": "ok", "service": "sentinel-ops"}
+    from backend.core.llm import validate_keys, PRIMARY_MODEL, FALLBACK_MODEL
+    from backend.core.job_store import job_store
+    keys   = validate_keys()
+    jobs   = job_store.all_jobs()
+    counts = {}
+    for j in jobs.values():
+        s = str(j.get("job_status", "unknown"))
+        counts[s] = counts.get(s, 0) + 1
+    return {
+        "status":  "ok",
+        "service": "sentinel-ops",
+        "version": "0.5.0",
+        "models":  {"primary": PRIMARY_MODEL, "fallback": FALLBACK_MODEL},
+        "keys":    keys,
+        "jobs":    {"total": len(jobs), **counts},
+    }
 
 
 @router.post("/jobs", status_code=202)

@@ -1,20 +1,14 @@
 """
 agents/supervisor.py
 ─────────────────────
-Phase 2: Real Groq/Llama 3 alert classification and decomposition.
-
-The Supervisor now:
-  1. Calls Llama 3 to classify the alert type
-  2. Extracts a structured decomposition plan
-  3. Sets alert_type on state for downstream agents to use
+Phase 5: Uses call_llm_json for robust JSON parsing with retry.
 """
 
 from __future__ import annotations
 import datetime
-import json
 from backend.core.state import SentinelState, JobStatus, AgentMessage
 from backend.core.tracing import trace_span
-from backend.core.llm import call_llm
+from backend.core.llm import call_llm_json
 
 SYSTEM_PROMPT = """You are a senior SOC (Security Operations Center) supervisor.
 Your job is to classify incoming security alerts and create a structured investigation plan.
@@ -38,18 +32,13 @@ def supervisor_node(state: SentinelState) -> SentinelState:
             state["error"] = "Empty problem statement received."
             return state
 
-        # ── Phase 2: Real LLM classification ─────────────────────────────
         try:
-            raw = call_llm(
+            parsed = call_llm_json(
                 system=SYSTEM_PROMPT,
                 user=f"Classify this security alert:\n\n{problem}",
                 temperature=0.1,
                 max_tokens=512,
             )
-
-            # Strip markdown fences if model adds them anyway
-            clean = raw.strip().strip("```json").strip("```").strip()
-            parsed = json.loads(clean)
 
             alert_type   = parsed.get("alert_type", "unknown")
             severity_est = parsed.get("severity_estimate", "MEDIUM")
@@ -61,7 +50,6 @@ def supervisor_node(state: SentinelState) -> SentinelState:
                 f"Key indicators: {', '.join(indicators) if indicators else 'none extracted'}.\n"
                 f"Investigation plan: {plan}"
             )
-
             state["alert_type"] = alert_type  # type: ignore[typeddict-unknown-key]
 
         except Exception as exc:

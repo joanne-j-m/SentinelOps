@@ -1,8 +1,9 @@
 """
 agents/reporter.py
 ───────────────────
-Phase 3: Adds Discord/Slack notifications and Noveum trace shipping.
-         Fixes misleading analyst loop message.
+Phase 5: Uses IP classifier to separate attacker vs victim IPs.
+         Recommendations now only block attacker IPs.
+         Uses call_llm_json for robust JSON handling.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from backend.core.tracing import trace_span
 from backend.core.llm import call_llm
 from backend.core.notify import send_notifications
 from backend.core.noveum import ship_trace
+from backend.core.ip_classifier import classify_ips
 
 SYSTEM_PROMPT = """You are a cybersecurity report writer.
 Write a concise, professional executive summary for a Threat Fact Sheet.
@@ -38,13 +40,17 @@ def reporter_node(state: SentinelState) -> SentinelState:
         confidence    = context.get("confidence", 0.0)
         severity      = _determine_severity(anomaly_score, confidence)
 
-        ips      = ", ".join(evidence.get("matched_ips", [])) or "None detected"
-        hashes   = ", ".join(evidence.get("matched_hashes", [])) or "None detected"
-        snippets = context.get("search_snippets", [])
-        cves     = context.get("cve_matches", [])
+        # ── Phase 5: Classify IPs as attacker vs victim ───────────────────
+        all_ips = evidence.get("matched_ips", [])
+        attacker_ips, victim_ips = classify_ips(all_ips, problem)
 
-        mitre_raw  = context.get("mitre_tactics", ["T1110", "T1078"])  # type: ignore[typeddict-item]
-        assessment = context.get("assessment", "")                       # type: ignore[typeddict-item]
+        attacker_str = ", ".join(attacker_ips) if attacker_ips else "None detected"
+        victim_str   = ", ".join(victim_ips)   if victim_ips   else "None detected"
+        hashes       = ", ".join(evidence.get("matched_hashes", [])) or "None detected"
+        snippets     = context.get("search_snippets", [])
+        cves         = context.get("cve_matches", [])
+        mitre_raw    = context.get("mitre_tactics", [])  # type: ignore[typeddict-item]
+        assessment   = context.get("assessment", "")      # type: ignore[typeddict-item]
 
         # ── LLM executive summary ─────────────────────────────────────────
         exec_summary = assessment or "Threat analysis complete."
@@ -53,9 +59,9 @@ def reporter_node(state: SentinelState) -> SentinelState:
                 system=SYSTEM_PROMPT,
                 user=(
                     f"Alert: {problem}\n"
-                    f"Severity: {severity}\n"
-                    f"Confidence: {confidence:.0%}\n"
-                    f"Suspicious IPs: {ips}\n"
+                    f"Severity: {severity}\nConfidence: {confidence:.0%}\n"
+                    f"Attacker IPs: {attacker_str}\n"
+                    f"Victim hosts: {victim_str}\n"
                     f"Analyst assessment: {assessment}\n"
                     f"MITRE tactics: {', '.join(mitre_raw) if mitre_raw else 'unknown'}"
                 ),
@@ -65,7 +71,7 @@ def reporter_node(state: SentinelState) -> SentinelState:
         except Exception as exc:
             span["error"] = str(exc)
 
-        # ── Build fact sheet sections ─────────────────────────────────────
+        # ── Build sections ────────────────────────────────────────────────
         intel_md = "\n".join(f"  - {s[:200]}" for s in snippets[:3]) or "  - No external intel gathered."
         cve_md   = "\n".join(
             f"  - **{c.get('id','?')}**: {c.get('description','')[:100]}"
@@ -74,8 +80,13 @@ def reporter_node(state: SentinelState) -> SentinelState:
         mitre_md = "\n".join(f"- {t}" for t in mitre_raw) if mitre_raw else "- Unknown"
         logs_md  = "\n".join(evidence.get("raw_logs", ["No logs captured"])[:4])
 
-        recommendations = [
-            f"Block IP(s) {ips} at perimeter firewall immediately." if ips != "None detected" else "Review firewall rules for anomalous traffic.",
+        # ── Phase 5: Smart recommendations using classified IPs ───────────
+        recommendations = []
+        if attacker_ips:
+            recommendations.append(f"Block attacker IP(s) {attacker_str} at perimeter firewall immediately.")
+        if victim_ips:
+            recommendations.append(f"Isolate and investigate victim host(s): {victim_str}.")
+        recommendations += [
             "Reset credentials for all affected accounts.",
             "Enable enhanced logging on affected systems.",
             "Check for lateral movement within the subnet.",
@@ -98,7 +109,8 @@ def reporter_node(state: SentinelState) -> SentinelState:
 ## Evidence
 - **Anomaly Score:** {anomaly_score:.2f}
 - **Reason:** {evidence.get("anomaly_reason", "N/A")}
-- **Suspicious IPs:** {ips}
+- **Attacker IPs:** {attacker_str}
+- **Victim Hosts:** {victim_str}
 - **File Hashes:** {hashes}
 
 ## Raw Log Sample
@@ -119,7 +131,7 @@ def reporter_node(state: SentinelState) -> SentinelState:
 {mitre_md}
 
 ---
-*Generated by Sentinel-Ops v0.3 · Powered by Llama 3 via Groq*
+*Generated by Sentinel-Ops v0.5 · Powered by Llama 3 via Groq*
 """
 
         fact_sheet: ThreatFactSheet = {
@@ -135,15 +147,12 @@ def reporter_node(state: SentinelState) -> SentinelState:
 
         msg: AgentMessage = {
             "role":      "reporter",
-            "content":   f"Threat Fact Sheet compiled. Severity: {severity}. Confidence: {confidence:.0%}.",
+            "content":   f"Threat Fact Sheet compiled. Severity: {severity}. Confidence: {confidence:.0%}. Attacker IPs: {attacker_str}. Victim hosts: {victim_str}.",
             "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         }
         state.setdefault("messages", []).append(msg)
-        span["result"] = f"severity={severity} chars={len(markdown)}"
+        span["result"] = f"severity={severity} attackers={attacker_ips} victims={victim_ips}"
 
-    # ── Phase 3: Notifications + Noveum tracing ───────────────────────────
-    # Called outside trace_span so spans are fully populated before shipping
     send_notifications(fact_sheet, job_id)
     ship_trace(state)
-
     return state

@@ -1,21 +1,14 @@
 """
 agents/analyst.py
 ──────────────────
-Phase 2: Real enrichment via Tavily search + Groq/Llama 3 reasoning.
-
-The Analyst now:
-  1. Searches Tavily for IP/CVE/hash threat intel (if API key set)
-  2. Calls Llama 3 to reason over evidence + search snippets
-  3. Produces a confidence score based on LLM assessment
-  4. Triggers loop back to Scout if confidence is too low
+Phase 5: Uses call_llm_json for robust JSON parsing with retry.
 """
 
 from __future__ import annotations
 import datetime
-import json
 from backend.core.state import SentinelState, JobStatus, AgentMessage, ThreatContext
 from backend.core.tracing import trace_span
-from backend.core.llm import call_llm
+from backend.core.llm import call_llm_json
 from backend.core.search import search_threat_intel
 
 CONFIDENCE_THRESHOLD = 0.6
@@ -59,7 +52,7 @@ def analyst_node(state: SentinelState) -> SentinelState:
         )
         snippets = search_threat_intel(search_targets, max_results=2) if search_targets else []
 
-        # ── Step 2: LLM reasoning over evidence + search context ──────────
+        # ── Step 2: LLM reasoning ─────────────────────────────────────────
         evidence_summary = (
             f"Anomaly score: {evidence.get('anomaly_score', 0)}\n"
             f"Anomaly reason: {evidence.get('anomaly_reason', 'N/A')}\n"
@@ -74,14 +67,14 @@ def analyst_node(state: SentinelState) -> SentinelState:
             if snippets else "\n\nNo external threat intel available."
         )
 
-        confidence   = 0.5   # safe default
-        assessment   = "Insufficient data for full analysis."
-        cve_matches  = []
+        confidence    = 0.5
+        assessment    = "Insufficient data for full analysis."
+        cve_matches   = []
         mitre_tactics = []
-        needs_more   = False
+        needs_more    = False
 
         try:
-            raw = call_llm(
+            parsed = call_llm_json(
                 system=SYSTEM_PROMPT,
                 user=(
                     f"Analyse this security evidence (investigation loop {loop_count + 1}):\n\n"
@@ -91,9 +84,6 @@ def analyst_node(state: SentinelState) -> SentinelState:
                 max_tokens=768,
             )
 
-            clean  = raw.strip().strip("```json").strip("```").strip()
-            parsed = json.loads(clean)
-
             confidence    = float(parsed.get("confidence", 0.5))
             assessment    = parsed.get("threat_assessment", assessment)
             cve_matches   = parsed.get("cve_matches", [])
@@ -102,7 +92,6 @@ def analyst_node(state: SentinelState) -> SentinelState:
 
         except Exception as exc:
             span["error"] = str(exc)
-            # Fallback: use anomaly_score as confidence proxy
             confidence = min(evidence.get("anomaly_score", 0.5) * 0.9, 0.85)
 
         # ── Step 3: Decide loop or proceed ────────────────────────────────
@@ -112,15 +101,13 @@ def analyst_node(state: SentinelState) -> SentinelState:
         )
 
         context: ThreatContext = {
-            "cve_matches":    cve_matches,
-            "threat_intel":   [{"snippet": s} for s in snippets],
+            "cve_matches":     cve_matches,
+            "threat_intel":    [{"snippet": s} for s in snippets],
             "search_snippets": snippets,
-            "confidence":     round(confidence, 3),
+            "confidence":      round(confidence, 3),
         }
-
-        # Store mitre_tactics on context for reporter
         context["mitre_tactics"] = mitre_tactics  # type: ignore[typeddict-unknown-key]
-        context["assessment"]    = assessment       # type: ignore[typeddict-unknown-key]
+        context["assessment"]    = assessment      # type: ignore[typeddict-unknown-key]
 
         msg: AgentMessage = {
             "role": "analyst",
@@ -129,7 +116,7 @@ def analyst_node(state: SentinelState) -> SentinelState:
                 f"Confidence: {confidence:.0%}. "
                 f"Assessment: {assessment[:100]}... "
                 + ("→ Confidence below threshold, requesting more Scout data." if should_loop
-                   else "→ Sufficient confidence, proceeding to report.")
+                   else "→ Confidence sufficient, proceeding to report.")
             ),
             "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         }
