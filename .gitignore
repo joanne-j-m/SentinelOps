@@ -5,8 +5,9 @@ __pycache__/
 *.pyo
 *.pyd
 .env
-!.env.example
-.env.*
+.env.local
+.env.production
+.env.staging
 *.egg-info/
 pip-wheel-metadata/
 build/
@@ -21,4 +22,3 @@ htmlcov/
 .vscode/
 .idea/
 .DS_Store
-.env.local
