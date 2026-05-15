@@ -1,68 +1,96 @@
 """
 agents/reporter.py
 ───────────────────
-The Reporter Agent compiles the final Threat Fact Sheet from all prior state.
-
-Phase 1 behaviour (stub):
-  - Builds a structured markdown Threat Fact Sheet from state data
-  - Marks job as COMPLETE
-  - Writes fact_sheet to state
-
-Phase 3 will add:
-  - Discord/Slack webhook posting
-  - noveum_trace span wrapping
-  - Groq/Llama 3 for narrative summary generation
+Phase 2: Groq/Llama 3 generates the narrative Threat Fact Sheet summary.
+         Reporter now uses LLM for the executive summary section.
 """
 
 from __future__ import annotations
 import datetime
-from backend.core.state import (
-    SentinelState, JobStatus, AgentMessage, ThreatFactSheet
-)
+from backend.core.state import SentinelState, JobStatus, AgentMessage, ThreatFactSheet
 from backend.core.tracing import trace_span
+from backend.core.llm import call_llm
+
+SYSTEM_PROMPT = """You are a cybersecurity report writer.
+Write a concise, professional executive summary for a Threat Fact Sheet.
+Keep it to 3-4 sentences. Be direct, factual, and actionable.
+Do not use bullet points. Do not repeat the raw log data."""
 
 
 def _determine_severity(anomaly_score: float, confidence: float) -> str:
     combined = (anomaly_score + confidence) / 2
-    if combined >= 0.85:
-        return "CRITICAL"
-    elif combined >= 0.70:
-        return "HIGH"
-    elif combined >= 0.50:
-        return "MEDIUM"
+    if combined >= 0.85: return "CRITICAL"
+    elif combined >= 0.70: return "HIGH"
+    elif combined >= 0.50: return "MEDIUM"
     return "LOW"
 
 
 def reporter_node(state: SentinelState) -> SentinelState:
     with trace_span(state, "reporter", "compile_fact_sheet") as span:
-        evidence = state.get("evidence", {})
-        context  = state.get("context", {})
-        problem  = state.get("problem_statement", "N/A")
+        evidence  = state.get("evidence", {})
+        context   = state.get("context", {})
+        problem   = state.get("problem_statement", "N/A")
 
         anomaly_score = evidence.get("anomaly_score", 0.0)
         confidence    = context.get("confidence", 0.0)
         severity      = _determine_severity(anomaly_score, confidence)
 
-        # Build markdown Threat Fact Sheet
         ips      = ", ".join(evidence.get("matched_ips", [])) or "None detected"
         hashes   = ", ".join(evidence.get("matched_hashes", [])) or "None detected"
-        intel    = context.get("threat_intel", [])
         snippets = context.get("search_snippets", [])
+        cves     = context.get("cve_matches", [])
 
-        intel_md = "\n".join(
-            f"  - **{i.get('ip', '?')}**: {i.get('notes', '')}" for i in intel
-        ) or "  - No threat intel matches."
+        # Pull mitre_tactics from context (set by analyst in Phase 2)
+        mitre_raw  = context.get("mitre_tactics", ["T1110", "T1078"])  # type: ignore[typeddict-item]
+        assessment = context.get("assessment", "")                       # type: ignore[typeddict-item]
 
-        snippets_md = "\n".join(f"  - {s}" for s in snippets) or "  - No search data."
+        # ── LLM executive summary ─────────────────────────────────────────
+        exec_summary = assessment  # fallback
+        try:
+            exec_summary = call_llm(
+                system=SYSTEM_PROMPT,
+                user=(
+                    f"Alert: {problem}\n"
+                    f"Severity: {severity}\n"
+                    f"Confidence: {confidence:.0%}\n"
+                    f"Suspicious IPs: {ips}\n"
+                    f"Analyst assessment: {assessment}\n"
+                    f"MITRE tactics: {', '.join(mitre_raw) if mitre_raw else 'unknown'}"
+                ),
+                temperature=0.3,
+                max_tokens=300,
+            )
+        except Exception as exc:
+            span["error"] = str(exc)
+
+        # ── Build threat intel section ────────────────────────────────────
+        intel_md = "\n".join(f"  - {s[:200]}" for s in snippets[:3]) or "  - No external intel gathered."
+        cve_md   = "\n".join(
+            f"  - **{c.get('id','?')}**: {c.get('description','')[:100]}"
+            for c in cves[:3]
+        ) or "  - No CVEs matched."
+        mitre_md = "\n".join(f"- {t}" for t in mitre_raw) if mitre_raw else "- Unknown"
+        logs_md  = "\n".join(evidence.get("raw_logs", ["No logs captured"])[:4])
+
+        recommendations = [
+            f"Block IP(s) {ips} at perimeter firewall immediately." if ips != "None detected" else "Review firewall rules for anomalous traffic.",
+            "Reset credentials for all affected accounts.",
+            "Enable enhanced logging on affected systems.",
+            "Check for lateral movement within the subnet.",
+            "Review and patch systems matching identified CVEs." if cves else "Keep all systems patched and updated.",
+        ]
 
         markdown = f"""# 🛡️ Sentinel-Ops — Threat Fact Sheet
-**Generated:** {datetime.datetime.utcnow().isoformat()}Z
+**Generated:** {datetime.datetime.now(datetime.UTC).isoformat()}
 **Severity:** {severity}
 **Confidence:** {confidence:.0%}
 
 ---
 
-## Alert Summary
+## Executive Summary
+{exec_summary}
+
+## Alert
 > {problem}
 
 ## Evidence
@@ -73,51 +101,42 @@ def reporter_node(state: SentinelState) -> SentinelState:
 
 ## Raw Log Sample
 ```
-{"  ".join(evidence.get("raw_logs", ["No logs captured"])[:3])}
+{logs_md}
 ```
+
+## CVE Matches
+{cve_md}
 
 ## Threat Intelligence
 {intel_md}
 
-## Search Context
-{snippets_md}
-
 ## Recommendations
-1. Block IP `{ips}` at perimeter firewall immediately.
-2. Reset credentials for the targeted account.
-3. Review SSH config: enforce key-based auth, disable password login.
-4. Check for lateral movement from source IP across the subnet.
+{chr(10).join(f"{i+1}. {r}" for i, r in enumerate(recommendations))}
 
-## MITRE ATT&CK (Inferred)
-- T1110 — Brute Force
-- T1078 — Valid Accounts (post-compromise risk)
+## MITRE ATT&CK
+{mitre_md}
 
 ---
-*Generated by Sentinel-Ops v0.1 · [STUB mode — Phase 1]*
+*Generated by Sentinel-Ops v0.2 · Powered by Llama 3 via Groq*
 """
 
         fact_sheet: ThreatFactSheet = {
-            "summary":         f"SSH brute-force detected from {ips}. Severity: {severity}.",
+            "summary":         exec_summary,
             "severity":        severity,
-            "recommendations": [
-                "Block attacker IP at firewall.",
-                "Reset targeted account credentials.",
-                "Enable key-based SSH auth.",
-            ],
-            "mitre_tactics": ["T1110", "T1078"],
-            "raw_markdown":  markdown,
+            "recommendations": recommendations,
+            "mitre_tactics":   mitre_raw,
+            "raw_markdown":    markdown,
         }
 
         msg: AgentMessage = {
-            "role": "reporter",
-            "content": f"Threat Fact Sheet compiled. Severity: {severity}.",
-            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "role":      "reporter",
+            "content":   f"Threat Fact Sheet compiled. Severity: {severity}. Confidence: {confidence:.0%}.",
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         }
 
-        state["fact_sheet"]  = fact_sheet
-        state["job_status"]  = JobStatus.COMPLETE
+        state["fact_sheet"] = fact_sheet
+        state["job_status"] = JobStatus.COMPLETE
         state.setdefault("messages", []).append(msg)
-
-        span["result"] = f"severity={severity} fact_sheet_chars={len(markdown)}"
+        span["result"] = f"severity={severity} chars={len(markdown)}"
 
     return state

@@ -86,11 +86,11 @@ def test_analyst_triggers_loop_on_low_confidence(base_state):
     assert result["job_status"] == JobStatus.LOOPING
 
 def test_analyst_no_loop_on_second_pass(base_state):
-    """Second run: confidence is 0.82, should NOT loop."""
-    base_state["loop_count"] = 1       # Simulate already looped once
+    """At MAX_LOOPS the graph must NOT loop regardless of confidence."""
+    base_state["loop_count"] = 3       # At MAX_LOOPS ceiling
     base_state = scout_node(base_state)
     result = analyst_node(base_state)
-    assert result["context"]["confidence"] >= 0.6
+    # Once loop_count >= MAX_LOOPS the analyst must not trigger another loop
     assert result["job_status"] != JobStatus.LOOPING
 
 

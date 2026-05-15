@@ -1,63 +1,100 @@
 """
 agents/scout.py
 ────────────────
-The Scout Agent gathers raw evidence from logs, files, or webhook payloads.
-
-Phase 1 behaviour (stub):
-  - Simulates finding a suspicious IP and log lines
-  - Populates state['evidence'] with placeholder data
-  - Marks anomaly_score so the Analyst can decide if looping is needed
-
-Phase 2 will add:
-  - Real log file parsing via watchdog / inotify
-  - Regex-based IOC extraction (IP, hash, user-agent patterns)
-  - Webhook payload deserialisation (Falco, Wazuh, custom SIEM alerts)
+Phase 2: Real IOC extraction from the problem statement using ioc_parser.
+         Groq/Llama 3 analyses the raw text to surface log-like evidence.
 """
 
 from __future__ import annotations
 import datetime
 from backend.core.state import SentinelState, JobStatus, AgentMessage, ThreatEvidence
 from backend.core.tracing import trace_span
+from backend.core.ioc_parser import extract_iocs, compute_anomaly_score
+from backend.core.llm import call_llm
+
+SYSTEM_PROMPT = """You are a security scout agent specialising in log analysis.
+Given a security alert or log data, extract the raw evidence.
+
+Respond ONLY with a JSON object:
+{
+  "raw_logs": ["<log line 1>", "<log line 2>"],
+  "anomaly_reason": "<one sentence describing the anomaly pattern>"
+}
+
+If no log lines are present in the input, synthesise what the logs would look like
+based on the described behaviour. Include at most 5 log lines."""
 
 
 def scout_node(state: SentinelState) -> SentinelState:
     with trace_span(state, "scout", "gather_evidence") as span:
-        problem = state.get("problem_statement", "")
+        problem    = state.get("problem_statement", "")
         loop_count = state.get("loop_count", 0)
-
         span["input"] = {"loop": loop_count, "problem_snippet": problem[:80]}
 
-        # ── Phase 1: Stub evidence ───────────────────────────────────────
-        # Phase 2: Replace with real log parsing, regex IOC extraction,
-        #          and file/webhook payload analysis.
+        # ── Step 1: Regex IOC extraction (always runs, no API needed) ─────
+        iocs = extract_iocs(problem, include_private_ips=True)
+
+        # ── Step 2: LLM log analysis ──────────────────────────────────────
+        raw_logs      = []
+        anomaly_reason = "Suspicious activity detected based on alert description."
+
+        try:
+            import json
+            loop_context = (
+                f"\n\nNote: This is investigation loop {loop_count + 1}. "
+                "Look deeper for additional evidence patterns."
+                if loop_count > 0 else ""
+            )
+
+            raw = call_llm(
+                system=SYSTEM_PROMPT,
+                user=f"Analyse this security alert and extract evidence:{loop_context}\n\n{problem}",
+                temperature=0.2,
+                max_tokens=512,
+            )
+
+            clean  = raw.strip().strip("```json").strip("```").strip()
+            parsed = json.loads(clean)
+
+            raw_logs       = parsed.get("raw_logs", [])
+            anomaly_reason = parsed.get("anomaly_reason", anomaly_reason)
+
+        except Exception as exc:
+            span["error"] = str(exc)
+            # Fallback: use the problem statement itself as the "log"
+            raw_logs = [f"[RAW ALERT] {problem}"]
+
+        # ── Step 3: Compute anomaly score from extracted IOCs + log volume ─
+        anomaly_score = compute_anomaly_score(iocs, raw_logs)
+
+        # Boost score slightly on re-loops (Scout found more context)
+        if loop_count > 0:
+            anomaly_score = min(anomaly_score + 0.10 * loop_count, 1.0)
+
         evidence: ThreatEvidence = {
-            "raw_logs": [
-                "2024-06-10T03:14:22Z  WARN  Failed SSH login from 192.168.1.42 (attempt 7/10)",
-                "2024-06-10T03:14:25Z  WARN  Failed SSH login from 192.168.1.42 (attempt 8/10)",
-                "2024-06-10T03:14:28Z ERROR  Account 'root' locked after 10 failed attempts",
-            ],
-            "matched_ips":    ["192.168.1.42"],
-            "matched_hashes": [],
-            # Simulate lower confidence on second loop to trigger analyst loop
-            "anomaly_score":  0.85 if loop_count == 0 else 0.95,
-            "anomaly_reason": (
-                "Repeated failed SSH login attempts followed by account lockout. "
-                "Possible brute-force attack."
-            ),
+            "raw_logs":       raw_logs,
+            "matched_ips":    iocs["ips"],
+            "matched_hashes": iocs["hashes"],
+            "anomaly_score":  round(anomaly_score, 3),
+            "anomaly_reason": anomaly_reason,
         }
 
         msg: AgentMessage = {
             "role": "scout",
             "content": (
-                f"[STUB] Evidence gathered on loop {loop_count}. "
-                f"Found {len(evidence['matched_ips'])} suspicious IP(s). "
-                f"Anomaly score: {evidence['anomaly_score']}"
+                f"Evidence gathered (loop {loop_count}): "
+                f"{len(iocs['ips'])} IP(s), {len(iocs['hashes'])} hash(es), "
+                f"{len(iocs['cves'])} CVE(s) found. "
+                f"Anomaly score: {anomaly_score:.2f}. "
+                f"Reason: {anomaly_reason}"
             ),
-            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         }
 
         state["evidence"] = evidence
         state.setdefault("messages", []).append(msg)
-        span["result"] = f"anomaly_score={evidence['anomaly_score']}"
+        span["result"] = (
+            f"ips={iocs['ips']} score={anomaly_score} logs={len(raw_logs)}"
+        )
 
     return state
