@@ -49,7 +49,7 @@ Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously 
               ┌──────────────────────┼──────────────────────┐
               │                      │                      │
        ┌──────▼──────┐      ┌────────▼───────┐    ┌────────▼───────┐
-       │   Discord   │      │ Noveum Tracing │    │  React Dashboard│
+       │   Discord   │      │ Omium Tracing  │    │  React Dashboard│
        │  Webhook    │      │   (spans)      │    │  localhost:8000 │
        └─────────────┘      └────────────────┘    └────────────────┘
 ```
@@ -75,7 +75,7 @@ Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously 
 - **Threat intel** — Tavily web search for live IP/CVE reputation
 - **MITRE ATT&CK mapping** — Auto-inferred tactics per threat type
 - **Discord/Slack notifications** — Rich embeds on job completion
-- **Noveum trace viewer** — Full pipeline observability in the dashboard
+- **Omium trace viewer** — Full pipeline observability with automatic LangGraph tracing + checkpoints
 - **Exponential backoff** — Automatic retry on Groq rate limits
 - **Robust JSON parsing** — Retry logic for malformed LLM responses
 - **SentinelAdapter** — P&E bench compatible adapter pattern
@@ -92,7 +92,7 @@ Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously 
 | Threat Intel | Tavily Search API |
 | Frontend | React 18 (no build step) |
 | Notifications | Discord + Slack Webhooks |
-| Tracing | Noveum Trace |
+| Tracing | Omium (auto LangGraph instrumentation + checkpoints) |
 | Testing | pytest (74 tests) |
 
 ---
@@ -115,7 +115,7 @@ sentinel-ops/
 │   │   ├── ip_classifier.py         # Attacker vs victim IP classifier
 │   │   ├── search.py                # Tavily threat intel search
 │   │   ├── notify.py                # Discord + Slack dispatcher
-│   │   ├── noveum.py                # Noveum trace shipper
+│   │   ├── omium.py                 # Omium trace + checkpoint integration
 │   │   └── tracing.py               # Trace span context manager
 │   ├── agents/
 │   │   ├── supervisor.py            # Alert classification agent
@@ -167,7 +167,7 @@ Edit `.env` and fill in:
 GROQ_API_KEY=gsk_...           # Required — https://console.groq.com
 TAVILY_API_KEY=tvly-...        # Optional — https://app.tavily.com
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...  # Optional
-NOVEUM_API_KEY=...             # Optional — https://noveum.ai
+OMIUM_API_KEY=...              # Optional — https://omium.ai (tracing + checkpoints)
 ```
 
 ### 3. Run tests
@@ -241,7 +241,7 @@ Response:
   "status": "ok",
   "version": "0.5.0",
   "models": { "primary": "llama-3.3-70b-versatile", "fallback": "llama-3.1-8b-instant" },
-  "keys": { "groq": true, "tavily": true, "discord": true, "noveum": true },
+  "keys": { "groq": true, "tavily": true, "discord": true, "omium": true },
   "jobs": { "total": 12, "complete": 10, "pending": 2 }
 }
 ```
@@ -292,7 +292,7 @@ File hash 3c4b2a1d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b quara
 |---|---|
 | 1 | LangGraph skeleton, state schema, stub agents, FastAPI, SentinelAdapter |
 | 2 | Real Groq/Llama 3 LLM calls, IOC parser, Tavily search |
-| 3 | Discord/Slack notifications, Noveum tracing, analyst message fix |
+| 3 | Discord/Slack notifications, Omium tracing + checkpoints, analyst message fix |
 | 4 | React Mission Control dashboard with live agent pipeline visualization |
 | 5 | JSON retry logic, IP classifier, exponential backoff, health endpoint |
 
