@@ -1,0 +1,299 @@
+# 🛡️ Sentinel-Ops
+
+**Autonomous Multi-Agent Threat Hunting Pipeline**
+
+> Powered by LangGraph · Llama 3 via Groq · FastAPI · React
+
+Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously investigates security alerts. Submit a threat description, and watch four specialized AI agents collaborate in real time to classify, investigate, enrich, and report on the threat — complete with MITRE ATT&CK mapping, threat intel lookups, and Discord notifications.
+
+---
+
+## Demo
+
+![Sentinel-Ops Dashboard](https://img.shields.io/badge/UI-Neural%20Threat%20Command-00e5ff?style=for-the-badge)
+![Tests](https://img.shields.io/badge/Tests-74%20Passing-00ff88?style=for-the-badge)
+![Python](https://img.shields.io/badge/Python-3.14-blue?style=for-the-badge)
+
+---
+
+## Architecture
+
+```
+                        ┌─────────────────────────────────┐
+                        │         FastAPI Backend          │
+                        │  POST /jobs  ·  GET /jobs/{id}  │
+                        └────────────┬────────────────────┘
+                                     │
+                        ┌────────────▼────────────────────┐
+                        │      LangGraph State Machine      │
+                        │                                  │
+                        │   ┌────────────┐                 │
+                        │   │ Supervisor │ classify alert   │
+                        │   └─────┬──────┘                 │
+                        │         │                        │
+                        │   ┌─────▼──────┐                 │
+                        │   │   Scout    │ extract IOCs    │
+                        │   └─────┬──────┘                 │
+                        │         │                        │
+                        │   ┌─────▼──────┐                 │
+                        │   │  Analyst   │ enrich + score  │
+                        │   └─────┬──────┘                 │
+                        │         │  confidence < 0.6?     │
+                        │         ├──────────────► Scout   │
+                        │         │  (autonomy loop)       │
+                        │   ┌─────▼──────┐                 │
+                        │   │  Reporter  │ compile + notify│
+                        │   └────────────┘                 │
+                        └─────────────────────────────────┘
+                                     │
+              ┌──────────────────────┼──────────────────────┐
+              │                      │                      │
+       ┌──────▼──────┐      ┌────────▼───────┐    ┌────────▼───────┐
+       │   Discord   │      │ Noveum Tracing │    │  React Dashboard│
+       │  Webhook    │      │   (spans)      │    │  localhost:8000 │
+       └─────────────┘      └────────────────┘    └────────────────┘
+```
+
+---
+
+## Agents
+
+| Agent | Role | Technology |
+|---|---|---|
+| **Supervisor** | Classifies alert type and severity, decomposes task | Llama 3 via Groq |
+| **Scout** | Extracts IOCs (IPs, hashes, CVEs), reconstructs logs | Regex + Llama 3 |
+| **Analyst** | Enriches evidence with threat intel, scores confidence | Tavily Search + Llama 3 |
+| **Reporter** | Compiles Threat Fact Sheet, sends notifications | Llama 3 + Discord/Slack |
+
+---
+
+## Features
+
+- **Autonomous loop** — Analyst loops back to Scout if confidence < 60%
+- **Real IOC extraction** — IPs, MD5/SHA1/SHA256 hashes, CVEs, domains
+- **IP classification** — Separates attacker IPs from victim hosts
+- **Threat intel** — Tavily web search for live IP/CVE reputation
+- **MITRE ATT&CK mapping** — Auto-inferred tactics per threat type
+- **Discord/Slack notifications** — Rich embeds on job completion
+- **Noveum trace viewer** — Full pipeline observability in the dashboard
+- **Exponential backoff** — Automatic retry on Groq rate limits
+- **Robust JSON parsing** — Retry logic for malformed LLM responses
+- **SentinelAdapter** — P&E bench compatible adapter pattern
+
+---
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | FastAPI + Python 3.14 |
+| Agent Framework | LangGraph 1.2+ |
+| LLM | Llama 3.3 70B via Groq |
+| Threat Intel | Tavily Search API |
+| Frontend | React 18 (no build step) |
+| Notifications | Discord + Slack Webhooks |
+| Tracing | Noveum Trace |
+| Testing | pytest (74 tests) |
+
+---
+
+## Project Structure
+
+```
+sentinel-ops/
+├── main.py                          # Entry point
+├── requirements.txt
+├── .env.example                     # Environment variable template
+├── frontend/
+│   └── index.html                   # React dashboard (no npm needed)
+├── backend/
+│   ├── core/
+│   │   ├── state.py                 # Shared LangGraph state schema
+│   │   ├── job_store.py             # Thread-safe in-memory job registry
+│   │   ├── llm.py                   # Groq client with retry + backoff
+│   │   ├── ioc_parser.py            # Regex IOC extractor
+│   │   ├── ip_classifier.py         # Attacker vs victim IP classifier
+│   │   ├── search.py                # Tavily threat intel search
+│   │   ├── notify.py                # Discord + Slack dispatcher
+│   │   ├── noveum.py                # Noveum trace shipper
+│   │   └── tracing.py               # Trace span context manager
+│   ├── agents/
+│   │   ├── supervisor.py            # Alert classification agent
+│   │   ├── scout.py                 # IOC extraction agent
+│   │   ├── analyst.py               # Threat enrichment agent
+│   │   └── reporter.py              # Fact sheet + notification agent
+│   ├── graph/
+│   │   └── pipeline.py              # LangGraph StateGraph definition
+│   ├── adapters/
+│   │   └── sentinel.py              # SentinelAdapter (P&E bench)
+│   └── api/
+│       ├── app.py                   # FastAPI factory
+│       └── routes.py                # API endpoints
+└── tests/
+    ├── test_phase1.py               # Graph wiring + adapter tests
+    ├── test_phase2.py               # IOC parser + search tests
+    ├── test_phase3.py               # Notification + tracing tests
+    ├── test_phase4.py               # (UI — visual verification)
+    └── test_phase5.py               # JSON retry + IP classifier tests
+```
+
+---
+
+## Quick Start
+
+### 1. Clone and set up
+
+```bash
+git clone https://github.com/vpadival/sentinel-ops.git
+cd sentinel-ops
+
+python -m venv venv
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # Mac/Linux
+
+pip install -r requirements.txt
+pip install pytest
+```
+
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and fill in:
+
+```env
+GROQ_API_KEY=gsk_...           # Required — https://console.groq.com
+TAVILY_API_KEY=tvly-...        # Optional — https://app.tavily.com
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...  # Optional
+NOVEUM_API_KEY=...             # Optional — https://noveum.ai
+```
+
+### 3. Run tests
+
+```bash
+python -m pytest tests/ -v
+# 74 passed
+```
+
+### 4. Start the server
+
+```bash
+python main.py
+```
+
+### 5. Open the dashboard
+
+```
+http://localhost:8000
+```
+
+---
+
+## API Reference
+
+### Submit a job
+```bash
+POST /api/v1/jobs
+Content-Type: application/json
+
+{
+  "problem_statement": "SSH brute-force from 203.0.113.42, 10 failed attempts. CVE-2023-38408 detected."
+}
+```
+
+Response:
+```json
+{
+  "job_id": "7bb1f521-...",
+  "status": "pending",
+  "message": "Job accepted. Poll GET /jobs/{job_id} for status."
+}
+```
+
+### Poll job status
+```bash
+GET /api/v1/jobs/{job_id}
+```
+
+### Ingest webhook alert
+```bash
+POST /api/v1/webhook/alert
+Content-Type: application/json
+
+{
+  "source": "falco",
+  "severity": "WARNING",
+  "rule": "Terminal shell in container",
+  "output": "A shell was spawned in a container..."
+}
+```
+
+### Health check
+```bash
+GET /api/v1/health
+```
+
+Response:
+```json
+{
+  "status": "ok",
+  "version": "0.5.0",
+  "models": { "primary": "llama-3.3-70b-versatile", "fallback": "llama-3.1-8b-instant" },
+  "keys": { "groq": true, "tavily": true, "discord": true, "noveum": true },
+  "jobs": { "total": 12, "complete": 10, "pending": 2 }
+}
+```
+
+---
+
+## Adapter Pattern (P&E Bench)
+
+```python
+from backend.adapters.sentinel import SentinelAdapter
+
+adapter = SentinelAdapter()
+result = adapter.execute_task(
+    "SSH brute-force from 203.0.113.42, CVE-2023-38408 detected."
+)
+
+print(result["fact_sheet"]["severity"])       # HIGH
+print(result["fact_sheet"]["recommendations"]) # ["Block 203.0.113.42...", ...]
+print(result["fact_sheet"]["mitre_tactics"])   # ["T1110", "T1190"]
+```
+
+---
+
+## Sample Alerts to Test
+
+```
+# Brute Force
+SSH brute-force from 203.0.113.42, 10 failed login attempts on root account. CVE-2023-38408 detected.
+
+# Ransomware + C2
+Ransomware detected on host 10.0.0.5. Outbound C2 connection to 185.220.101.47 on port 443. 2GB data exfiltrated.
+
+# Privilege Escalation
+Unusual sudo activity on prod-server-01. User jenkins executed chmod 777 /etc/passwd. CVE-2021-4034 polkit exploit detected.
+
+# Phishing
+User clicked suspicious link from ceo@comp4ny.com. Credential harvesting page at 45.33.32.156/login detected.
+
+# Malware Hash
+File hash 3c4b2a1d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b quarantined on WIN-DC-04. Outbound to 91.108.4.1:1337.
+```
+
+---
+
+## Implementation Phases
+
+| Phase | What was built |
+|---|---|
+| 1 | LangGraph skeleton, state schema, stub agents, FastAPI, SentinelAdapter |
+| 2 | Real Groq/Llama 3 LLM calls, IOC parser, Tavily search |
+| 3 | Discord/Slack notifications, Noveum tracing, analyst message fix |
+| 4 | React Mission Control dashboard with live agent pipeline visualization |
+| 5 | JSON retry logic, IP classifier, exponential backoff, health endpoint |
+
+---
