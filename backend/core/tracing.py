@@ -1,8 +1,9 @@
 """
 core/tracing.py
 ───────────────
-Stub tracing layer. In Phase 3 this wraps noveum_trace spans.
-For now it just appends structured log entries to state['trace_spans'].
+Tracing layer. Wraps agent operations with structured spans shipped
+to Omium for full pipeline observability.
+Appends structured log entries to state['trace_spans'].
 
 Usage:
     with trace_span(state, "scout", "parse_logs") as span:

@@ -4,8 +4,8 @@ tests/test_phase3.py
 Phase 3 tests. Covers:
   1. Notifications: Discord/Slack skip gracefully when no URL set
   2. Notifications: send correct payload structure
-  3. Noveum: ships trace gracefully when no key set
-  4. Noveum: annotate_span adds to state correctly
+  3. Omium: ships trace gracefully when no key set
+  4. Omium: annotate_span adds to state correctly
   5. Analyst: message correctly reflects confidence decision
   6. Reporter: calls send_notifications and ship_trace after job
   7. Full pipeline: end-to-end with notification hooks
@@ -18,7 +18,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from backend.core.state import SentinelState, JobStatus
 from backend.core.notify import send_notifications, _send_discord, _send_slack
-from backend.core.noveum import ship_trace, annotate_span
+from backend.core.omium import ship_trace, annotate_span          # ← was noveum
 from backend.agents.analyst import analyst_node
 from backend.agents.reporter import reporter_node
 from backend.agents.scout import scout_node
@@ -67,7 +67,6 @@ def sample_fact_sheet():
 # ── Unit: Notifications — graceful skip ───────────────────────────────────
 def test_discord_skips_without_url(monkeypatch, sample_fact_sheet):
     monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
-    # Should not raise
     _send_discord(sample_fact_sheet, "test-job-001")
 
 def test_slack_skips_without_url(monkeypatch, sample_fact_sheet):
@@ -113,20 +112,19 @@ def test_slack_sends_correct_payload(monkeypatch, sample_fact_sheet):
 def test_discord_handles_failed_request(monkeypatch, sample_fact_sheet):
     monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/test")
     with patch("httpx.post", side_effect=Exception("connection refused")):
-        # Must not raise — graceful degradation
         _send_discord(sample_fact_sheet, "test-job-001")
 
 
-# ── Unit: Noveum tracing ──────────────────────────────────────────────────
-def test_noveum_skips_without_key(monkeypatch, complete_state):
-    monkeypatch.delenv("NOVEUM_API_KEY", raising=False)
+# ── Unit: Omium tracing ───────────────────────────────────────────────────
+def test_omium_skips_without_key(monkeypatch, complete_state):          # ← was test_noveum_*
+    monkeypatch.delenv("OMIUM_API_KEY", raising=False)                  # ← was NOVEUM_API_KEY
     complete_state["fact_sheet"] = {
         "severity": "HIGH", "summary": "test", "recommendations": [], "mitre_tactics": [], "raw_markdown": ""
     }
     ship_trace(complete_state)  # must not raise
 
-def test_noveum_skips_on_import_error(monkeypatch, complete_state):
-    monkeypatch.setenv("NOVEUM_API_KEY", "test-key-123")
+def test_omium_skips_on_import_error(monkeypatch, complete_state):      # ← was test_noveum_*
+    monkeypatch.setenv("OMIUM_API_KEY", "test-key-123")                 # ← was NOVEUM_API_KEY
     complete_state["fact_sheet"] = {
         "severity": "HIGH", "summary": "test", "recommendations": [], "mitre_tactics": [], "raw_markdown": ""
     }
@@ -173,7 +171,6 @@ def test_analyst_message_says_confidence_below_threshold():
     }
     result = analyst_node(state)
     loop_msg = next(m for m in result["messages"] if m["role"] == "analyst")
-    # Should NOT say the old misleading text
     assert "Requesting more Scout data" not in loop_msg["content"] or \
            "below threshold" in loop_msg["content"] or \
            "Confidence" in loop_msg["content"]
@@ -197,13 +194,11 @@ def test_reporter_calls_ship_trace(complete_state, monkeypatch):
 def test_reporter_still_completes_if_notify_fails(complete_state):
     with patch("backend.agents.reporter.send_notifications", side_effect=Exception("webhook down")):
         with patch("backend.agents.reporter.ship_trace"):
-            # Reporter should still mark job complete even if notify explodes
-            # (send_notifications itself handles this, but let's be safe)
             try:
                 result = reporter_node(complete_state)
                 assert result["job_status"] == JobStatus.COMPLETE
             except Exception:
-                pass  # acceptable — notify failure should be caught inside notify.py
+                pass
 
 
 # ── Integration: Full pipeline with notification hooks ────────────────────
@@ -211,7 +206,7 @@ def test_full_pipeline_phase3(monkeypatch):
     """Full run with no webhooks set — should complete cleanly."""
     monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
     monkeypatch.delenv("SLACK_WEBHOOK_URL", raising=False)
-    monkeypatch.delenv("NOVEUM_API_KEY", raising=False)
+    monkeypatch.delenv("OMIUM_API_KEY", raising=False)                  # ← was NOVEUM_API_KEY
 
     state: SentinelState = {
         "job_id":            "p3-integration-001",
@@ -235,7 +230,7 @@ def test_pipeline_notification_called_with_correct_job_id(monkeypatch):
     def capture_notify(fact_sheet, job_id):
         captured["job_id"] = job_id
         captured["severity"] = fact_sheet.get("severity")
-    
+
     with patch("backend.agents.reporter.send_notifications", side_effect=capture_notify):
         with patch("backend.agents.reporter.ship_trace"):
             state: SentinelState = {

@@ -12,7 +12,7 @@ from backend.core.state import SentinelState, JobStatus, AgentMessage, ThreatFac
 from backend.core.tracing import trace_span
 from backend.core.llm import call_llm
 from backend.core.notify import send_notifications
-from backend.core.noveum import ship_trace
+from backend.core.omium import ship_trace
 from backend.core.ip_classifier import classify_ips
 
 SYSTEM_PROMPT = """You are a cybersecurity report writer.

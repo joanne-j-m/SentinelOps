@@ -45,7 +45,7 @@ def validate_keys() -> dict:
         "groq":    bool(os.getenv("GROQ_API_KEY", "").strip()),
         "tavily":  bool(os.getenv("TAVILY_API_KEY", "").strip()),
         "discord": bool(os.getenv("DISCORD_WEBHOOK_URL", "").strip()),
-        "noveum":  bool(os.getenv("NOVEUM_API_KEY", "").strip()),
+        "omium":   bool(os.getenv("OMIUM_API_KEY", "").strip()),    # ← was noveum/NOVEUM_API_KEY
     }
 
 

@@ -5,7 +5,7 @@ from .llm import call_llm
 from .ioc_parser import extract_iocs, compute_anomaly_score
 from .search import search_threat_intel
 from .notify import send_notifications
-from .noveum import ship_trace
+from .omium import ship_trace                                       # ← was noveum
 
 __all__ = [
     "SentinelState", "JobStatus", "AgentMessage",

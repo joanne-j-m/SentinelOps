@@ -464,7 +464,7 @@ function RightPanel({job}){
       {spans.length>0&&(
         <div className="right-section">
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
-            <div className="r-title" style={{marginBottom:0}}>Noveum Trace Viewer</div>
+            <div className="r-title" style={{marginBottom:0}}>Omium Trace Viewer</div>
             <span style={{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--c2)',
               background:'rgba(0,255,136,.08)',border:'1px solid rgba(0,255,136,.2)',
               borderRadius:2,padding:'2px 7px',letterSpacing:1}}>✓ SHIPPED</span>
@@ -563,13 +563,13 @@ function RightPanel({job}){
             ['Status', job.status?.toUpperCase()],
             ['Events', job.messages?.length||0],
             ['Spans', spans.length],
-            ['Noveum Trace', spans.length>0?'✓ Shipped':'—'],
+            ['Omium Trace', spans.length>0?'✓ Shipped':'—'],
             ['Discord Alert', job.fact_sheet?'✓ Fired':'—'],
           ].map(([k,v])=>(
             <div key={k} style={{display:'flex',justifyContent:'space-between',
               fontFamily:'var(--font-mono)',fontSize:10,paddingBottom:2}}>
               <span style={{color:'var(--txd)'}}>{k}</span>
-              <span style={{color:(k==='Noveum Trace'||k==='Discord Alert')&&v.startsWith('✓')?'var(--c2)':'var(--tx)'}}>{v}</span>
+              <span style={{color:(k==='Omium Trace'||k==='Discord Alert')&&v.startsWith('✓')?'var(--c2)':'var(--tx)'}}>{v}</span>
             </div>
           ))}
         </div>

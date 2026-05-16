@@ -2,6 +2,8 @@
 graph/pipeline.py
 ──────────────────
 Defines the LangGraph StateGraph that wires all agents together.
+Omium SDK is initialized here via init_omium() so it instruments
+LangGraph before the graph is compiled.
 
 Graph topology:
   START
@@ -20,9 +22,6 @@ Graph topology:
     └─── confidence OK  ──────────────────────────► reporter
                                                        │
                                                       END
-
-The edge function `route_after_analyst` implements the autonomy loop
-described in the PDF: "if the Analyst isn't sure, it loops back to Scout."
 """
 
 from __future__ import annotations
@@ -30,7 +29,10 @@ from langgraph.graph import StateGraph, END
 
 from backend.core.state import SentinelState, JobStatus
 from backend.agents import supervisor_node, scout_node, analyst_node, reporter_node
+from backend.core.omium import init_omium
 
+# Initialize Omium once — instruments LangGraph before graph compiles
+init_omium()
 
 CONFIDENCE_THRESHOLD = 0.6
 MAX_LOOPS = 3
@@ -46,20 +48,20 @@ def route_after_analyst(state: SentinelState) -> str:
     confidence = context.get("confidence", 1.0)
     status     = state.get("job_status")
 
-    # Hard stop conditions
     if status == JobStatus.FAILED:
-        return "reporter"   # Let Reporter write an error fact sheet
+        return "reporter"
 
     if confidence < CONFIDENCE_THRESHOLD and loop_count < MAX_LOOPS:
-        return "scout"      # Loop: gather more evidence
+        return "scout"
 
-    return "reporter"       # Proceed to final report
+    return "reporter"
 
 
 def build_graph() -> StateGraph:
     """
     Constructs and compiles the Sentinel-Ops LangGraph pipeline.
-    Returns a compiled graph ready for .invoke() or .stream().
+    Omium auto-instruments all nodes via instrument_langgraph() called
+    in init_omium() above.
     """
     graph = StateGraph(SentinelState)
 
@@ -74,7 +76,6 @@ def build_graph() -> StateGraph:
     graph.add_edge("supervisor", "scout")
     graph.add_edge("scout",      "analyst")
 
-    # Conditional edge: analyst → scout (loop) OR analyst → reporter
     graph.add_conditional_edges(
         "analyst",
         route_after_analyst,

@@ -6,7 +6,8 @@ Classifies IPs as attacker vs victim based on context.
 Priority order (most specific wins):
   1. IP mentioned as "host X" / "server X" / "workstation X" → VICTIM
   2. IP mentioned in a "to <IP>" pattern (destination of attack) → ATTACKER (C2)
-  3. IP mentioned in a "from <IP>" pattern AND is external/public → ATTACKER
+  3. IP mentioned in a "from <IP>" pattern → ATTACKER (source of attack,
+     even if private — an explicit "from" overrides the RFC1918 default)
   4. IP is private/RFC1918 → VICTIM (internal infrastructure)
   5. IP is external/public with no context → ATTACKER
 """
@@ -60,8 +61,8 @@ def classify_ips(
         # Priority 2: destination of malicious traffic → attacker C2
         elif ip in to_set:
             attacker_ips.append(ip)
-        # Priority 3: "from <IP>" AND public → attacker
-        elif ip in from_set and not is_private:
+        # Priority 3: "from <IP>" → attacker (explicit context beats RFC1918 default)
+        elif ip in from_set:
             attacker_ips.append(ip)
         # Priority 4: private IP with no other strong context → victim
         elif is_private:
