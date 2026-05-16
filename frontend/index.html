@@ -639,6 +639,30 @@ function App(){
     return()=>{if(pollRef.current)clearInterval(pollRef.current);};
   },[]);
 
+  // ── Monitor.py queue polling — auto-submit alerts from the proxy ──────────
+  const queueRef=useRef(null);
+  useEffect(()=>{
+    queueRef.current=setInterval(async()=>{
+      try{
+        const r=await fetch(`${API}/api/v1/queue`);
+        const d=await r.json();
+        if(d.alert){
+          // Auto-submit the alert as a job
+          const res=await fetch(`${API}/api/v1/jobs`,{
+            method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({problem_statement:d.alert})
+          });
+          const job=await res.json();
+          const nj={id:job.job_id,status:'pending',problem:d.alert,data:null};
+          setJobs(p=>[nj,...p]);
+          setSelId(job.job_id);setSelJob(null);
+          pollJob(job.job_id);
+        }
+      }catch{}
+    },3000);
+    return()=>clearInterval(queueRef.current);
+  },[pollJob]);
+
   const job=selJob;
   const isLive=job&&['pending','running','looping'].includes(job.status);
 

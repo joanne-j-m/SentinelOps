@@ -362,7 +362,7 @@ def run_simulator():
                            content=body.encode(), headers=headers)
         except Exception:
             pass
-        time.sleep(0.5)
+        time.sleep(3)
 
     log("─" * 60)
     log("Simulation complete! Check Sentinel-Ops dashboard for alerts.", "OK")

@@ -8,6 +8,8 @@ Endpoints:
   GET  /jobs/{job_id}     → Poll job status + result
   GET  /jobs              → List all jobs (debug)
   POST /webhook/alert     → Ingest a structured SIEM/Falco webhook (Phase 2)
+  POST /queue             → Monitor pushes alerts here (monitor.py integration)
+  GET  /queue             → Frontend polls and auto-submits queued alerts
   GET  /health            → Health check
 
 Design assumption: Auth/rate-limiting not added in Phase 1 (hackathon speed).
@@ -15,7 +17,7 @@ Phase 5 will add API key middleware.
 """
 
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 
@@ -36,28 +38,31 @@ class JobSubmitRequest(BaseModel):
 
 
 class JobStatusResponse(BaseModel):
-    job_id:     str
-    status:     str
-    error:      Optional[str] = None
-    messages:   list          = []
-    fact_sheet: Optional[Dict[str, Any]] = None
-    trace_spans: list         = []
+    job_id:      str
+    status:      str
+    error:       Optional[str] = None
+    messages:    list          = []
+    fact_sheet:  Optional[Dict[str, Any]] = None
+    trace_spans: list          = []
 
 
 class WebhookAlertRequest(BaseModel):
     """Stub for Phase 2: accepts Falco/Wazuh-style alert payloads."""
-    source:    str = Field(example="falco")
-    severity:  str = Field(example="WARNING")
-    rule:      str = Field(example="Terminal shell in container")
-    output:    str = Field(example="A shell was spawned in a container...")
-    fields:    Dict[str, Any] = {}
+    source:   str = Field(example="falco")
+    severity: str = Field(example="WARNING")
+    rule:     str = Field(example="Terminal shell in container")
+    output:   str = Field(example="A shell was spawned in a container...")
+    fields:   Dict[str, Any] = {}
+
+
+# ── In-memory alert queue (monitor.py → frontend auto-fill) ───────────────
+_alert_queue: list = []
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────
 @router.get("/health")
 async def health():
     from backend.core.llm import validate_keys, PRIMARY_MODEL, FALLBACK_MODEL
-    from backend.core.job_store import job_store
     keys   = validate_keys()
     jobs   = job_store.all_jobs()
     counts = {}
@@ -83,21 +88,18 @@ async def submit_job(body: JobSubmitRequest):
     """
     job_id = start_agent_workflow(body.problem_statement)
     return {
-        "job_id": job_id,
-        "status": JobStatus.PENDING,
+        "job_id":  job_id,
+        "status":  JobStatus.PENDING,
         "message": "Job accepted. Poll GET /jobs/{job_id} for status.",
     }
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
 async def get_job(job_id: str):
-    """
-    Poll job status. Returns full state once COMPLETE or FAILED.
-    """
+    """Poll job status. Returns full state once COMPLETE or FAILED."""
     state = job_store.get(job_id)
     if not state:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found.")
-
     return JobStatusResponse(
         job_id      = job_id,
         status      = state.get("job_status", JobStatus.PENDING),
@@ -118,11 +120,26 @@ async def list_jobs():
     ]
 
 
+@router.post("/queue", status_code=202)
+async def push_queue(body: JobSubmitRequest):
+    """monitor.py pushes detected alerts here. Frontend polls and auto-submits."""
+    _alert_queue.append(body.problem_statement)
+    return {"queued": True, "queue_depth": len(_alert_queue)}
+
+
+@router.get("/queue")
+async def pop_queue():
+    """Frontend polls this every 2s. Returns next alert and removes it from queue."""
+    if _alert_queue:
+        return {"alert": _alert_queue.pop(0)}
+    return {"alert": None}
+
+
 @router.post("/webhook/alert", status_code=202)
 async def webhook_alert(body: WebhookAlertRequest):
     """
-    Phase 2 stub: receive structured SIEM/Falco alerts.
-    Currently converts the alert to a problem_statement and submits a job.
+    Phase 2: receive structured SIEM/Falco alerts.
+    Converts the alert to a problem_statement and submits a job.
     """
     problem = (
         f"[{body.source.upper()} ALERT — {body.severity}] "
@@ -130,8 +147,8 @@ async def webhook_alert(body: WebhookAlertRequest):
     )
     job_id = start_agent_workflow(problem)
     return {
-        "job_id": job_id,
-        "status": JobStatus.PENDING,
-        "source": body.source,
+        "job_id":  job_id,
+        "status":  JobStatus.PENDING,
+        "source":  body.source,
         "message": "Webhook ingested and job started.",
     }
