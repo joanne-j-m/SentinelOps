@@ -2,9 +2,9 @@
 
 **Autonomous Multi-Agent Threat Hunting Pipeline**
 
-> Powered by LangGraph · Llama 3 via Groq · FastAPI · React
+> Powered by LangGraph · Llama 3 via Groq · FastAPI · React · Omium
 
-Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously investigates security alerts. Submit a threat description, and watch four specialized AI agents collaborate in real time to classify, investigate, enrich, and report on the threat — complete with MITRE ATT&CK mapping, threat intel lookups, and Discord notifications.
+Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously investigates security alerts. Submit a threat description, and watch four specialized AI agents collaborate in real time to classify, investigate, enrich, and report on the threat — complete with MITRE ATT&CK mapping, threat intel lookups, Discord notifications, and live website monitoring.
 
 ---
 
@@ -52,6 +52,11 @@ Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously 
        │   Discord   │      │ Omium Tracing  │    │  React Dashboard│
        │  Webhook    │      │   (spans)      │    │  localhost:8000 │
        └─────────────┘      └────────────────┘    └────────────────┘
+                                     ▲
+                            ┌────────┴───────┐
+                            │  monitor.py    │
+                            │ (proxy/detect) │
+                            └────────────────┘
 ```
 
 ---
@@ -76,6 +81,8 @@ Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously 
 - **MITRE ATT&CK mapping** — Auto-inferred tactics per threat type
 - **Discord/Slack notifications** — Rich embeds on job completion
 - **Omium trace viewer** — Full pipeline observability with automatic LangGraph tracing + checkpoints
+- **Live website monitor** — `monitor.py` proxy detects SQLi, XSS, path traversal, brute force in real time
+- **Auto-submit alerts** — Monitor pushes detected threats directly to the dashboard
 - **Exponential backoff** — Automatic retry on Groq rate limits
 - **Robust JSON parsing** — Retry logic for malformed LLM responses
 - **SentinelAdapter** — P&E bench compatible adapter pattern
@@ -93,6 +100,7 @@ Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously 
 | Frontend | React 18 (no build step) |
 | Notifications | Discord + Slack Webhooks |
 | Tracing | Omium (auto LangGraph instrumentation + checkpoints) |
+| Live Monitor | monitor.py (Flask reverse proxy + attack detector) |
 | Testing | pytest (74 tests) |
 
 ---
@@ -102,6 +110,7 @@ Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously 
 ```
 sentinel-ops/
 ├── main.py                          # Entry point
+├── monitor.py                       # Live website monitor + attack simulator
 ├── requirements.txt
 ├── .env.example                     # Environment variable template
 ├── frontend/
@@ -191,6 +200,46 @@ http://localhost:8000
 
 ---
 
+## Live Website Monitor
+
+`monitor.py` sits as a reverse proxy in front of any website and automatically detects attacks — SQL injection, XSS, path traversal, command injection, brute force, and scanner bots. Detected threats are pushed directly to the Sentinel-Ops dashboard.
+
+### Run as proxy (monitors real traffic)
+
+```bash
+# Terminal 1 — start the proxy in front of your website
+python monitor.py --target http://localhost:3000 --port 9000
+
+# Visit your website via the monitor:
+# http://localhost:9000
+```
+
+### Run attack simulator (demo mode)
+
+```bash
+# Terminal 1 — start proxy
+python monitor.py --target http://localhost:8000 --port 9000
+
+# Terminal 2 — simulate attacks
+python monitor.py --simulate
+```
+
+Watch the Sentinel-Ops dashboard at `http://localhost:8000` — alerts auto-appear and agents investigate in real time.
+
+### Detected attack types
+
+| Attack | Detection Method |
+|---|---|
+| SQL Injection | Regex on URL + body (UNION SELECT, DROP TABLE, etc.) |
+| XSS | Script tags, javascript: URIs, event handlers |
+| Path Traversal | `../` sequences, `/etc/passwd`, `/windows/system32` |
+| Command Injection | Shell metacharacters, backticks, `$(...)` |
+| Brute Force | Rate limiting — 30 req/60s threshold |
+| Scanner/Bot | User-agent matching (nikto, sqlmap, nmap, etc.) |
+| Sensitive Paths | `/.env`, `/.git`, `/admin`, `/wp-admin`, etc. |
+
+---
+
 ## API Reference
 
 ### Submit a job
@@ -215,6 +264,21 @@ Response:
 ### Poll job status
 ```bash
 GET /api/v1/jobs/{job_id}
+```
+
+### Push alert from monitor
+```bash
+POST /api/v1/queue
+Content-Type: application/json
+
+{
+  "problem_statement": "SQL injection detected from 1.2.3.4..."
+}
+```
+
+### Poll queue (frontend auto-submit)
+```bash
+GET /api/v1/queue
 ```
 
 ### Ingest webhook alert
@@ -295,5 +359,6 @@ File hash 3c4b2a1d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b quara
 | 3 | Discord/Slack notifications, Omium tracing + checkpoints, analyst message fix |
 | 4 | React Mission Control dashboard with live agent pipeline visualization |
 | 5 | JSON retry logic, IP classifier, exponential backoff, health endpoint |
+| 6 | Omium SDK integration, live website monitor (monitor.py), auto-alert queue |
 
 ---
