@@ -19,6 +19,9 @@ USAGE:
   OR if you just want to simulate attacks without a proxy:
   python monitor.py --simulate
 
+  Control simulation speed:
+  python monitor.py --simulate --interval 10   # 10s between attacks (default: 5)
+
 REQUIREMENTS:
   pip install httpx flask flask-cors
 """
@@ -133,7 +136,7 @@ def submit_to_sentinel(problem_statement: str, dedupe_key: str = None):
 
 def poll_result(job_id: str):
     """Poll job until complete and print the threat report."""
-    for _ in range(30):  # poll for up to 60s
+    for _ in range(30):
         time.sleep(2)
         try:
             r = httpx.get(f"{SENTINEL_URL}/api/v1/jobs/{job_id}", timeout=5)
@@ -147,7 +150,6 @@ def poll_result(job_id: str):
                 log(f"── Threat Report for job {job_id[:8]} ──────────────────", "OK")
                 log(f"Severity: {severity}", "OK")
                 if markdown:
-                    # Print first 500 chars of the report
                     preview = markdown[:500].replace("\n", " | ")
                     log(f"Report: {preview}...", "OK")
                 log(f"Full report: {SENTINEL_URL} → click the job in the dashboard", "OK")
@@ -212,7 +214,7 @@ def analyze_request(method: str, path: str, headers: dict,
                     f"User-Agent: {user_agent}",
                     dedupe_key=f"{attack_type}:{client_ip}:{path}"
                 )
-                break  # one alert per attack type per request
+                break
 
     # ── 4. Sensitive path access ───────────────────────────────────────────
     sensitive_paths = [
@@ -267,7 +269,6 @@ def run_proxy(target_url: str, listen_port: int):
 
         log(f"{request.method} /{path} from {client_ip}")
 
-        # Analyze the request
         analyze_request(
             method=request.method,
             path="/" + path,
@@ -276,7 +277,6 @@ def run_proxy(target_url: str, listen_port: int):
             client_ip=client_ip,
         )
 
-        # Forward to your actual website
         try:
             url = f"{target_url}/{path}"
             if request.query_string:
@@ -296,7 +296,6 @@ def run_proxy(target_url: str, listen_port: int):
                 follow_redirects=True,
             )
 
-            # Track failed auth responses
             if resp.status_code in (401, 403) and "/" + path in ("/login", "/admin", "/auth"):
                 failed_auth[client_ip] += 1
 
@@ -319,17 +318,16 @@ def run_proxy(target_url: str, listen_port: int):
 
 
 # ── Attack simulator (for testing) ────────────────────────────────────────
-def run_simulator():
+def run_simulator(interval: int = 5):
     """
-    Simulate various attacks against localhost:8080 for testing.
-    Make sure your website is running on port 8080 first.
+    Simulate various attacks against the monitor proxy for testing.
+    interval: seconds to wait between each attack (default 5).
     """
     import httpx
 
-    TARGET = "http://localhost:9000"  # point at the monitor proxy
+    TARGET = "http://localhost:9000"
 
     attacks = [
-        # (description, method, path, body)
         ("Normal request",          "GET",  "/",             ""),
         ("SQL Injection in URL",    "GET",  "/search?q=1' UNION SELECT * FROM users--", ""),
         ("XSS in body",             "POST", "/comment",      '{"text": "<script>alert(document.cookie)</script>"}'),
@@ -342,11 +340,12 @@ def run_simulator():
         ("Sensitive path access",   "GET",  "/.env",         ""),
         ("Sensitive path access",   "GET",  "/.git/config",  ""),
         ("Command injection",       "POST", "/ping",         "host=127.0.0.1; cat /etc/passwd"),
-        ("Scanner user agent",      "GET",  "/",             ""),  # uses nikto UA
+        ("Scanner user agent",      "GET",  "/",             ""),
     ]
 
     log("Starting attack simulation...", "WARN")
     log(f"Targeting: {TARGET}", "WARN")
+    log(f"Interval between attacks: {interval}s", "INFO")
     log("─" * 60)
 
     client = httpx.Client(timeout=3)
@@ -362,7 +361,7 @@ def run_simulator():
                            content=body.encode(), headers=headers)
         except Exception:
             pass
-        time.sleep(3)
+        time.sleep(interval)   # ← configurable interval
 
     log("─" * 60)
     log("Simulation complete! Check Sentinel-Ops dashboard for alerts.", "OK")
@@ -386,9 +385,13 @@ if __name__ == "__main__":
         "--simulate", action="store_true",
         help="Run attack simulation instead of proxy"
     )
+    parser.add_argument(
+        "--interval", type=int, default=5,
+        help="Seconds between simulated attacks (default: 5)"
+    )
     args = parser.parse_args()
 
     if args.simulate:
-        run_simulator()
+        run_simulator(interval=args.interval)
     else:
         run_proxy(args.target, args.port)
