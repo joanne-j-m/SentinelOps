@@ -23,7 +23,7 @@ PRIMARY_MODEL  = "llama-3.3-70b-versatile"
 FALLBACK_MODEL = "llama-3.1-8b-instant"
 
 MAX_RETRIES    = 3
-BACKOFF_BASE   = 1.5   # seconds
+BACKOFF_BASE   = 3   # seconds
 
 
 def _get_client() -> Groq:
