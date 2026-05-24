@@ -50,14 +50,14 @@ def supervisor_node(state: SentinelState) -> SentinelState:
                 f"Key indicators: {', '.join(indicators) if indicators else 'none extracted'}.\n"
                 f"Investigation plan: {plan}"
             )
-            state["alert_type"] = alert_type  # type: ignore[typeddict-unknown-key]
+            state["alert_type"] = alert_type
 
         except Exception as exc:
             content = (
                 f"LLM classification failed ({exc}). "
                 "Proceeding with generic investigation."
             )
-            state["alert_type"] = "unknown"  # type: ignore[typeddict-unknown-key]
+            state["alert_type"] = "unknown"
             span["error"] = str(exc)
 
         msg: AgentMessage = {
