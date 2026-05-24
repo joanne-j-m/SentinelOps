@@ -162,7 +162,7 @@ def test_health_returns_ok():
 
 def test_health_returns_version():
     resp = client.get("/api/v1/health")
-    assert resp.json()["version"] == "0.5.0"
+    assert resp.json()["version"] == "0.7.0"
 
 def test_health_returns_key_status():
     resp = client.get("/api/v1/health")
