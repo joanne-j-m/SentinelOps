@@ -105,9 +105,9 @@ def analyst_node(state: SentinelState) -> SentinelState:
             "threat_intel":    [{"snippet": s} for s in snippets],
             "search_snippets": snippets,
             "confidence":      round(confidence, 3),
+            "mitre_tactics":   mitre_tactics,
+            "assessment":      assessment,
         }
-        context["mitre_tactics"] = mitre_tactics  # type: ignore[typeddict-unknown-key]
-        context["assessment"]    = assessment      # type: ignore[typeddict-unknown-key]
 
         msg: AgentMessage = {
             "role": "analyst",

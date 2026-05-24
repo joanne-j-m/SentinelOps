@@ -46,6 +46,8 @@ class ThreatContext(TypedDict, total=False):
     threat_intel:    List[Dict[str, str]]
     search_snippets: List[str]
     confidence:      float      # 0.0–1.0; if < 0.5 → loop back to Scout
+    mitre_tactics:   List[str]
+    assessment:      str
 
 
 class ThreatFactSheet(TypedDict, total=False):
@@ -64,6 +66,7 @@ class SentinelState(TypedDict, total=False):
     problem_statement: str      # The raw input / alert description
     loop_count:      int        # Safety valve: max 3 Scout→Analyst loops
     error:           Optional[str]
+    alert_type:      str        # Set by supervisor: brute_force, malware, etc.
 
     # ── Agent communication log ────────────────────────────────
     messages:        List[AgentMessage]

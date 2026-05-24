@@ -2,40 +2,30 @@
 graph/pipeline.py
 ──────────────────
 Defines the LangGraph StateGraph that wires all agents together.
-Omium SDK is initialized here via init_omium() so it instruments
-LangGraph before the graph is compiled.
+
+Phase 7 fix: Lazy initialization via get_graph(). The graph and Omium SDK
+are initialized on first call, not at import time.
 
 Graph topology:
-  START
-    │
-    ▼
-  supervisor          ← validates & decomposes
-    │
-    ▼
-  scout               ← gathers raw evidence
-    │
-    ▼
-  analyst             ← enriches & scores confidence
-    │
-    ├─── confidence < threshold AND loops < 3  ──► scout  (cyclic loop)
-    │
-    └─── confidence OK  ──────────────────────────► reporter
-                                                       │
-                                                      END
+  START → supervisor → scout → analyst ─┬─ confidence OK → reporter → END
+                                         └─ low confidence → scout (loop)
 """
 
 from __future__ import annotations
-from langgraph.graph import StateGraph, END
+import threading
+from typing import Any
+
+from langgraph.graph import StateGraph, END  # type: ignore[import-untyped]
 
 from backend.core.state import SentinelState, JobStatus
 from backend.agents import supervisor_node, scout_node, analyst_node, reporter_node
-from backend.core.omium import init_omium
-
-# Initialize Omium once — instruments LangGraph before graph compiles
-init_omium()
 
 CONFIDENCE_THRESHOLD = 0.6
 MAX_LOOPS = 3
+
+# ── Lazy singleton ─────────────────────────────────────────────────────────
+_graph: Any = None
+_graph_lock = threading.Lock()
 
 
 def route_after_analyst(state: SentinelState) -> str:
@@ -57,11 +47,10 @@ def route_after_analyst(state: SentinelState) -> str:
     return "reporter"
 
 
-def build_graph() -> StateGraph:
+def _build_graph() -> Any:
     """
     Constructs and compiles the Sentinel-Ops LangGraph pipeline.
-    Omium auto-instruments all nodes via instrument_langgraph() called
-    in init_omium() above.
+    Returns a CompiledStateGraph (typed as Any because langgraph lacks stubs).
     """
     graph = StateGraph(SentinelState)
 
@@ -90,5 +79,32 @@ def build_graph() -> StateGraph:
     return graph.compile()
 
 
-# Module-level compiled graph (import and call .invoke())
-sentinel_graph = build_graph()
+def get_graph() -> Any:
+    """
+    Lazy singleton — initializes Omium and builds the graph on first call.
+    Thread-safe via lock.
+    """
+    global _graph
+    if _graph is not None:
+        return _graph
+
+    with _graph_lock:
+        if _graph is not None:
+            return _graph
+
+        # Initialize Omium before compiling the graph so it can instrument nodes
+        from backend.core.omium import init_omium
+        init_omium()
+
+        _graph = _build_graph()
+        return _graph
+
+
+# Backwards compatibility — existing code imports `sentinel_graph` directly.
+# This is now a lazy proxy; attribute access triggers initialization.
+class _LazyGraph:
+    """Proxy that defers graph construction until first use."""
+    def __getattr__(self, name: str) -> Any:
+        return getattr(get_graph(), name)
+
+sentinel_graph = _LazyGraph()

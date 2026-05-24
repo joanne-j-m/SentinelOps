@@ -11,6 +11,7 @@ import re
 import json
 import time
 import logging
+from typing import Any, Dict
 from groq import Groq
 from dotenv import load_dotenv
 
@@ -36,7 +37,7 @@ def _get_client() -> Groq:
     return _client
 
 
-def validate_keys() -> dict:
+def validate_keys() -> Dict[str, bool]:
     """
     Called at startup. Returns status of all configured API keys.
     Used by the /health endpoint.
@@ -51,12 +52,13 @@ def validate_keys() -> dict:
 
 def clean_json(raw: str) -> str:
     """
-    Phase 5: Robust JSON extraction from LLM output.
+    Phase 7: Robust JSON extraction from LLM output.
     Handles:
       - Markdown code fences (```json ... ```)
       - Leading/trailing prose before/after the JSON object
-      - Escaped newlines inside string values
       - Trailing commas (common LLM mistake)
+    Uses bracket-balanced extraction instead of greedy regex to avoid
+    grabbing prose between two separate JSON-like fragments.
     """
     # Strip markdown fences
     text = raw.strip()
@@ -64,10 +66,34 @@ def clean_json(raw: str) -> str:
     text = re.sub(r'```\s*$', '', text, flags=re.MULTILINE)
     text = text.strip()
 
-    # Extract just the JSON object if there's surrounding prose
-    match = re.search(r'\{[\s\S]*\}', text)
-    if match:
-        text = match.group(0)
+    # Extract the first balanced JSON object using bracket counting.
+    # This avoids the greedy regex problem where `{a} prose {b}` would
+    # match from the first `{` to the last `}`.
+    start = text.find('{')
+    if start != -1:
+        depth = 0
+        in_string = False
+        escape_next = False
+        for i in range(start, len(text)):
+            c = text[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if c == '\\' and in_string:
+                escape_next = True
+                continue
+            if c == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    text = text[start:i + 1]
+                    break
 
     # Fix trailing commas before } or ]  (common LLM mistake)
     text = re.sub(r',\s*([}\]])', r'\1', text)
@@ -99,7 +125,8 @@ def call_llm(
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
-                return response.choices[0].message.content.strip()
+                content = response.choices[0].message.content
+                return (content or "").strip()
 
             except Exception as exc:
                 err = str(exc).lower()
@@ -127,7 +154,7 @@ def call_llm_json(
     user: str,
     temperature: float = 0.1,
     max_tokens: int = 1024,
-) -> dict:
+) -> Dict[str, Any]:
     """
     Phase 5: LLM call that guarantees a parsed dict back.
     Retries up to MAX_RETRIES times if JSON parsing fails.

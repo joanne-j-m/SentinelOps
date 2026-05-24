@@ -28,18 +28,18 @@ REQUIREMENTS:
 
 import argparse
 import time
-import threading
 import re
 import json
 import httpx
 from datetime import datetime
 from collections import defaultdict
+from typing import Dict, List, Optional, Set
 
 # ── Sentinel-Ops config ────────────────────────────────────────────────────
 SENTINEL_URL = "http://localhost:8000"
 
 # ── Attack detection patterns ──────────────────────────────────────────────
-ATTACK_PATTERNS = {
+ATTACK_PATTERNS: Dict[str, Optional[List[str]]] = {
     "SQL Injection": [
         r"(\bUNION\b.*\bSELECT\b)",
         r"(\bSELECT\b.*\bFROM\b)",
@@ -88,9 +88,9 @@ ATTACK_PATTERNS = {
 }
 
 # ── State tracking ─────────────────────────────────────────────────────────
-request_counts   = defaultdict(list)   # ip -> [timestamps]
-failed_auth      = defaultdict(int)    # ip -> count
-submitted_alerts = set()               # dedupe alerts
+request_counts: Dict[str, List[float]]   = defaultdict(list)   # ip -> [timestamps]
+failed_auth: Dict[str, int]              = defaultdict(int)    # ip -> count
+submitted_alerts: Set[str]               = set()               # dedupe alerts
 
 # ── Thresholds ─────────────────────────────────────────────────────────────
 RATE_LIMIT_WINDOW   = 60    # seconds
@@ -102,7 +102,7 @@ def now():
     return datetime.now().strftime("%H:%M:%S")
 
 
-def log(msg, level="INFO"):
+def log(msg: str, level: str = "INFO") -> None:
     colors = {"INFO": "\033[36m", "WARN": "\033[33m", "ALERT": "\033[31m", "OK": "\033[32m"}
     reset = "\033[0m"
     c = colors.get(level, "")
@@ -110,7 +110,7 @@ def log(msg, level="INFO"):
 
 
 # ── Sentinel-Ops integration ───────────────────────────────────────────────
-def submit_to_sentinel(problem_statement: str, dedupe_key: str = None):
+def submit_to_sentinel(problem_statement: str, dedupe_key: Optional[str] = None) -> None:
     """Push alert to Sentinel-Ops queue — frontend will auto-fill and submit."""
 
     if dedupe_key and dedupe_key in submitted_alerts:
@@ -164,8 +164,8 @@ def poll_result(job_id: str):
 
 
 # ── Request analyzer ───────────────────────────────────────────────────────
-def analyze_request(method: str, path: str, headers: dict,
-                    body: str, client_ip: str):
+def analyze_request(method: str, path: str, headers: Dict[str, str],
+                    body: str, client_ip: str) -> None:
     """
     Analyze an incoming request for threats.
     Call this from your web framework middleware.
@@ -243,11 +243,8 @@ def run_proxy(target_url: str, listen_port: int):
         from flask import Flask, request, Response
         import flask_cors
     except ImportError:
-        log("Installing required packages...", "INFO")
-        import subprocess
-        subprocess.run(["pip", "install", "flask", "flask-cors", "--quiet"])
-        from flask import Flask, request, Response
-        import flask_cors
+        log("flask and flask-cors are required. Install with: pip install flask flask-cors", "WARN")
+        raise SystemExit(1)
 
     app = Flask(__name__)
     flask_cors.CORS(app)
@@ -262,8 +259,8 @@ def run_proxy(target_url: str, listen_port: int):
 
     @app.route("/", defaults={"path": ""}, methods=["GET","POST","PUT","DELETE","PATCH","OPTIONS"])
     @app.route("/<path:path>",             methods=["GET","POST","PUT","DELETE","PATCH","OPTIONS"])
-    def proxy(path):
-        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    def proxy(path: str):  # type: ignore[return]  # Flask route
+        client_ip = request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown"
         body      = request.get_data(as_text=True)
         headers   = dict(request.headers)
 

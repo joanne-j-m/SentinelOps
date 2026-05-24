@@ -8,6 +8,8 @@ Phase 5: Uses IP classifier to separate attacker vs victim IPs.
 
 from __future__ import annotations
 import datetime
+import logging
+from typing import List
 from backend.core.state import SentinelState, JobStatus, AgentMessage, ThreatFactSheet
 from backend.core.tracing import trace_span
 from backend.core.llm import call_llm
@@ -49,8 +51,8 @@ def reporter_node(state: SentinelState) -> SentinelState:
         hashes       = ", ".join(evidence.get("matched_hashes", [])) or "None detected"
         snippets     = context.get("search_snippets", [])
         cves         = context.get("cve_matches", [])
-        mitre_raw    = context.get("mitre_tactics", [])  # type: ignore[typeddict-item]
-        assessment   = context.get("assessment", "")      # type: ignore[typeddict-item]
+        mitre_raw    = context.get("mitre_tactics", [])
+        assessment   = context.get("assessment", "")
 
         # ── LLM executive summary ─────────────────────────────────────────
         exec_summary = assessment or "Threat analysis complete."
@@ -81,7 +83,7 @@ def reporter_node(state: SentinelState) -> SentinelState:
         logs_md  = "\n".join(evidence.get("raw_logs", ["No logs captured"])[:4])
 
         # ── Phase 5: Smart recommendations using classified IPs ───────────
-        recommendations = []
+        recommendations: List[str] = []
         if attacker_ips:
             recommendations.append(f"Block attacker IP(s) {attacker_str} at perimeter firewall immediately.")
         if victim_ips:
@@ -153,6 +155,16 @@ def reporter_node(state: SentinelState) -> SentinelState:
         state.setdefault("messages", []).append(msg)
         span["result"] = f"severity={severity} attackers={attacker_ips} victims={victim_ips}"
 
-    send_notifications(fact_sheet, job_id)
-    ship_trace(state)
+    try:
+        send_notifications(dict(fact_sheet), job_id)  # type: ignore[arg-type]
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(f"Notification failed for job {job_id}: {exc}")
+
+    try:
+        ship_trace(state)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(f"Trace shipping failed for job {job_id}: {exc}")
+
     return state
