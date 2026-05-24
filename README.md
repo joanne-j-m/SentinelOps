@@ -183,7 +183,6 @@ GROQ_API_KEY=gsk_...           # Required — https://console.groq.com
 TAVILY_API_KEY=tvly-...        # Optional — https://app.tavily.com
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...  # Optional
 OMIUM_API_KEY=...              # Optional — https://omium.ai (tracing + bonus credit)
-SENTINEL_API_KEY=              # Optional — set to require auth on mutating endpoints
 ```
 
 ### 3. Run tests
