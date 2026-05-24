@@ -11,8 +11,9 @@ Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously 
 ## Demo
 
 ![Sentinel-Ops Dashboard](https://img.shields.io/badge/UI-Neural%20Threat%20Command-00e5ff?style=for-the-badge)
-![Tests](https://img.shields.io/badge/Tests-74%20Passing-00ff88?style=for-the-badge)
+![Tests](https://img.shields.io/badge/Tests-104%20Passing-00ff88?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.14-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-0.7.0-orange?style=for-the-badge)
 
 ---
 
@@ -22,6 +23,7 @@ Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously 
                         ┌─────────────────────────────────┐
                         │         FastAPI Backend          │
                         │  POST /jobs  ·  GET /jobs/{id}  │
+                        │  X-API-Key auth on mutations     │
                         └────────────┬────────────────────┘
                                      │
                         ┌────────────▼────────────────────┐
@@ -83,8 +85,12 @@ Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously 
 - **Omium trace viewer** — Full pipeline observability with automatic LangGraph tracing + checkpoints
 - **Live website monitor** — `monitor.py` proxy detects SQLi, XSS, path traversal, brute force in real time
 - **Auto-submit alerts** — Monitor pushes detected threats directly to the dashboard
+- **API key authentication** — `X-API-Key` header on all mutating endpoints
+- **Input sanitization** — Control character stripping and 5000-char length cap before LLM ingestion
+- **Thread-safe job store** — Deep-copy isolation prevents race conditions between polling and graph threads
+- **Lazy graph initialization** — Pipeline compiles on first use, not at import time
 - **Exponential backoff** — Automatic retry on Groq rate limits
-- **Robust JSON parsing** — Retry logic for malformed LLM responses
+- **Robust JSON parsing** — Bracket-balanced extractor + retry logic for malformed LLM responses
 - **SentinelAdapter** — P&E bench compatible adapter pattern
 
 ---
@@ -101,7 +107,7 @@ Sentinel-Ops is a stateful multi-agent cybersecurity pipeline that autonomously 
 | Notifications | Discord + Slack Webhooks |
 | Tracing | Omium (auto LangGraph instrumentation + checkpoints) |
 | Live Monitor | monitor.py (Flask reverse proxy + attack detector) |
-| Testing | pytest (74 tests) |
+| Testing | pytest (104 tests) |
 
 ---
 
@@ -132,18 +138,18 @@ sentinel-ops/
 │   │   ├── analyst.py               # Threat enrichment agent
 │   │   └── reporter.py              # Fact sheet + notification agent
 │   ├── graph/
-│   │   └── pipeline.py              # LangGraph StateGraph definition
+│   │   └── pipeline.py              # LangGraph StateGraph definition (lazy init)
 │   ├── adapters/
 │   │   └── sentinel.py              # SentinelAdapter (P&E bench)
 │   └── api/
-│       ├── app.py                   # FastAPI factory
-│       └── routes.py                # API endpoints
+│       ├── app.py                   # FastAPI factory + CORS config
+│       └── routes.py                # API endpoints + auth middleware
 └── tests/
     ├── test_phase1.py               # Graph wiring + adapter tests
     ├── test_phase2.py               # IOC parser + search tests
     ├── test_phase3.py               # Notification + tracing tests
-    ├── test_phase4.py               # (UI — visual verification)
-    └── test_phase5.py               # JSON retry + IP classifier tests
+    ├── test_phase5.py               # JSON retry + IP classifier tests
+    └── test_phase7_fixes.py         # Security, correctness, and type-safety tests
 ```
 
 ---
@@ -176,14 +182,15 @@ Edit `.env` and fill in:
 GROQ_API_KEY=gsk_...           # Required — https://console.groq.com
 TAVILY_API_KEY=tvly-...        # Optional — https://app.tavily.com
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...  # Optional
-OMIUM_API_KEY=...              # Optional — https://omium.ai (tracing + checkpoints)
+OMIUM_API_KEY=...              # Optional — https://omium.ai (tracing + bonus credit)
+SENTINEL_API_KEY=              # Optional — set to require auth on mutating endpoints
 ```
 
 ### 3. Run tests
 
 ```bash
 python -m pytest tests/ -v
-# 74 passed
+# 104 passed
 ```
 
 ### 4. Start the server
@@ -246,6 +253,7 @@ Watch the Sentinel-Ops dashboard at `http://localhost:8000` — alerts auto-appe
 ```bash
 POST /api/v1/jobs
 Content-Type: application/json
+X-API-Key: your-key-here      # required if SENTINEL_API_KEY is set
 
 {
   "problem_statement": "SSH brute-force from 203.0.113.42, 10 failed attempts. CVE-2023-38408 detected."
@@ -270,6 +278,7 @@ GET /api/v1/jobs/{job_id}
 ```bash
 POST /api/v1/queue
 Content-Type: application/json
+X-API-Key: your-key-here
 
 {
   "problem_statement": "SQL injection detected from 1.2.3.4..."
@@ -285,6 +294,7 @@ GET /api/v1/queue
 ```bash
 POST /api/v1/webhook/alert
 Content-Type: application/json
+X-API-Key: your-key-here
 
 {
   "source": "falco",
@@ -303,7 +313,7 @@ Response:
 ```json
 {
   "status": "ok",
-  "version": "0.5.0",
+  "version": "0.7.0",
   "models": { "primary": "llama-3.3-70b-versatile", "fallback": "llama-3.1-8b-instant" },
   "keys": { "groq": true, "tavily": true, "discord": true, "omium": true },
   "jobs": { "total": 12, "complete": 10, "pending": 2 }
@@ -322,7 +332,7 @@ result = adapter.execute_task(
     "SSH brute-force from 203.0.113.42, CVE-2023-38408 detected."
 )
 
-print(result["fact_sheet"]["severity"])       # HIGH
+print(result["fact_sheet"]["severity"])        # HIGH
 print(result["fact_sheet"]["recommendations"]) # ["Block 203.0.113.42...", ...]
 print(result["fact_sheet"]["mitre_tactics"])   # ["T1110", "T1190"]
 ```
@@ -360,5 +370,38 @@ File hash 3c4b2a1d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b quara
 | 4 | React Mission Control dashboard with live agent pipeline visualization |
 | 5 | JSON retry logic, IP classifier, exponential backoff, health endpoint |
 | 6 | Omium SDK integration, live website monitor (monitor.py), auto-alert queue |
+| 7 | API key auth, CORS hardening, thread-safe job store, input sanitization, lazy graph init, full type annotations, 30 new tests |
 
 ---
+
+## Security
+
+| Control | Implementation |
+|---|---|
+| API authentication | `X-API-Key` header — set `SENTINEL_API_KEY` in `.env` to enable |
+| CORS | Locked to `localhost:8000` and `localhost:9000` — no wildcard |
+| Input sanitization | Control characters stripped, 5000-char hard cap before LLM ingestion |
+| Thread safety | `JobStore.get()` and `create()` return deep copies — graph thread cannot corrupt poll thread reads |
+| Dependency safety | `monitor.py` no longer auto-installs packages via subprocess |
+
+---
+
+## Dependencies
+
+All dependencies are listed in `requirements.txt`. Key ones:
+
+```
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+langgraph>=0.2.0
+langchain-core>=0.2.19
+groq>=0.8.0
+python-dotenv>=1.0.1
+httpx>=0.27.0
+pydantic>=2.7.1
+tavily-python>=0.3.0
+aiofiles>=23.0.0
+omium
+flask>=3.0.0
+flask-cors>=4.0.0
+```
