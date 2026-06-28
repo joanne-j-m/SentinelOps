@@ -182,7 +182,7 @@ Edit `.env` and fill in:
 GROQ_API_KEY=gsk_...           #  https://console.groq.com
 TAVILY_API_KEY=tvly-...        # https://app.tavily.com
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...  # Optional
-OMIUM_API_KEY=...              # — https://omium.ai
+OMIUM_API_KEY=...              #  https://omium.ai
 ```
 
 ### 3. Run tests
