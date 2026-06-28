@@ -179,10 +179,10 @@ cp .env.example .env
 Edit `.env` and fill in:
 
 ```env
-GROQ_API_KEY=gsk_...           # Required — https://console.groq.com
-TAVILY_API_KEY=tvly-...        # Optional — https://app.tavily.com
+GROQ_API_KEY=gsk_...           #  https://console.groq.com
+TAVILY_API_KEY=tvly-...        # https://app.tavily.com
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...  # Optional
-OMIUM_API_KEY=...              # Optional — https://omium.ai (tracing + bonus credit)
+OMIUM_API_KEY=...              # — https://omium.ai
 ```
 
 ### 3. Run tests
