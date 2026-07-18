@@ -388,8 +388,8 @@ File hash 3c4b2a1d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b quara
 ## Dependencies
 
 All dependencies are listed in `requirements.txt`. Key ones:
+_____
 
-```
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 langgraph>=0.2.0
